@@ -1,0 +1,106 @@
+Description of MADSPACK files
+=============================
+
+Known Filename Extensions
+-------------------------
+
+.SS  - Sprite Sheets
+.FF  - Bitmap Fonts
+.PIK - Pictures
+
+Internal Structure
+------------------
+
+A MAD packed file contains several data sections, each of which
+can be compressed or uncompressed.
+
+The file starts with a file header, followed by (probably up to 10) section
+headers followed by the data sections starting at offset 0xb0
+
+words are 2-byte little-endian unsigned integers
+
+File Header (16 bytes)
+    -------------------------------------------------------
+    field        length    description
+    -----------  --------  --------------------------------
+    id           12 bytes  constant ASCII "MADSPACK 2.0"
+    unknown      2 bytes   constant two bytes 0x1A 0x00
+    nb_sect      1 word    number of sections  (e.g 0x03 0x00)
+    -------------------------------------------------------
+
+After the file header up to 10 section headers follow. It seems the content
+between the last section header and the data offset 0xb0 is undefined.
+
+Section Header (10 bytes)
+    -------------------------------------------------------
+    field        length    description
+    -----------  --------  --------------------------------
+    compressed   1 byte    0x00 uncompressed section
+                           0x01 compressed section
+    unknown      1 byte    0x04 in .SS files
+                           0x07 in .FF files
+                           unknown in .PIK files
+    orig_size    4 bytes   length of original data in bytes
+    packed_size  4 bytes   length of packed data in bytes
+    -------------------------------------------------------
+
+For uncompressed sections packed_size equals orig_size.
+
+The section data starts at offset 0xB0.
+Uncompressed sections just contain the original data without any padding or
+alignment.
+
+Structure of Compressed sections
+--------------------------------
+(Starting point was MADSPackViewer by Zharramadar[1])
+
+The compressed data starts with the three bytes "FAB" followed by the
+one byte offset_size. So far I only encountered offset_size=12=0x0C.
+
+The rest is an interleaved stream of control-bits and data bytes.
+
+The control bits are read into a buffer of 16 bits. At the beginning of the
+stream and each time the buffer is exhausted 16 bits are read from the stream
+and put into the buffer. The first control bit consumed is the least signigicant
+bit of the first byte of the stream.
+
+There are three control sequences with variable length.
+    -------------------------------------------------------------
+    Code  Length  Action
+    ----  ------  -----------------------------------------------
+    1     1 bit   Copy the current byte from stream to the output
+    00xx  4 bits  Read 1 byte from the data stream defining the
+                  position of data to be read from the partial
+                  output and written to the end. The length of
+                  the data is xx+2 (2,3,4 or 5).
+    01    2 bits  Read 2 or 3 bytes from the data stream defining
+                  the position and length of data to be read from
+                  the output and written to its end.
+                  offset_size (4 th byte) is the number of bits
+                  used for calculating the offset of the copy, the
+                  remaining bits are used for defining the length
+                  If the remaining bits are zero the length is
+                  read as a third byte from the stream
+    -------------------------------------------------------------
+
+The positions in codes 00xx and 01 are given as negative numbers to be added to
+the current write position of the output stream.
+
+Example: Code 0001 reads byte 0xFC, the offset is 252 - 256 = -4
+    The length is encoded in the bits 01 = 1, so the length is 1 + 2 = 3 bytes.
+    The action is to copy 3 bytes starting from the 4th last byte in the current
+    output. If the output before the action was "...UVWXYZ" then this code will
+    copy "WXY" to the end leading output of "...UVWXYZWXY"
+
+Example: Code 01 reads 0xff 0xf0 (as a word 0xf0ff) and offset_size (the fourth
+    byte in the section) equals 12. The offset is calculated as the 8 bits from
+    the first byte 0xff and the *top* four bits of 0xf0 to get the total offset
+    of 0xfff then treated as negative to get 0xfff - 0x1000 = -1
+    The remaining bits specify the length of the copy, in this case they are
+    zero and a third byte is read from the stream to define the length.
+
+
+
+
+
+[1] https://forums.civfanatics.com/members/zharramadar.135394/
